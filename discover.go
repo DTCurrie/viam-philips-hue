@@ -146,7 +146,7 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 		}
 
 		// All Hue lights use the same model - they all support on/off and brightness
-		c.Model = HueLight
+		c.Model = HueLightBrightness
 
 		configs = append(configs, c)
 	}
