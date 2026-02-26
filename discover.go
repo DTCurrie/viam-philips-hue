@@ -133,22 +133,45 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 
 	configs := []resource.Config{}
 	for _, light := range lights {
-		s.logger.Debugf("discovery result light: %d %s type: %s", light.ID, light.Name, light.Type)
+		colorMode := ""
+		if light.State != nil {
+			colorMode = light.State.ColorMode
+		}
+		supportsColor := colorMode == "xy" || colorMode == "hs"
 
-		c := resource.Config{
-			Name: light.Name,
-			API:  toggleswitch.API,
-			Attributes: utils.AttributeMap{
-				"bridge_host": s.cfg.BridgeHost,
-				"username":    s.cfg.Username,
-				"light_id":    light.ID,
-			},
+		s.logger.Debugf("discovery result light: %d %s type: %s colormode: %s", light.ID, light.Name, light.Type, colorMode)
+
+		baseAttrs := utils.AttributeMap{
+			"bridge_host": s.cfg.BridgeHost,
+			"username":    s.cfg.Username,
+			"light_id":    light.ID,
 		}
 
-		// All Hue lights use the same model - they all support on/off and brightness
-		c.Model = HueLight
+		// All lights support brightness control.
+		configs = append(configs, resource.Config{
+			Name:       light.Name,
+			API:        toggleswitch.API,
+			Model:      HueLightBrightness,
+			Attributes: baseAttrs,
+		})
 
-		configs = append(configs, c)
+		// Color lights get one switch per RGB channel.
+		if supportsColor {
+			for _, channel := range []string{"red", "green", "blue"} {
+				channelAttrs := utils.AttributeMap{
+					"bridge_host": s.cfg.BridgeHost,
+					"username":    s.cfg.Username,
+					"light_id":    light.ID,
+					"channel":     channel,
+				}
+				configs = append(configs, resource.Config{
+					Name:       fmt.Sprintf("%s-%s", light.Name, channel),
+					API:        toggleswitch.API,
+					Model:      HueLightColor,
+					Attributes: channelAttrs,
+				})
+			}
+		}
 	}
 	return configs, nil
 }

@@ -10,23 +10,23 @@ import (
 	"go.viam.com/rdk/resource"
 )
 
-var HueLight = family.WithModel("hue-light")
+var HueLightBrightness = family.WithModel("hue-light-brightness")
 
 func init() {
-	resource.RegisterComponent(toggleswitch.API, HueLight,
-		resource.Registration[toggleswitch.Switch, *LightConfig]{
-			Constructor: newHueLight,
+	resource.RegisterComponent(toggleswitch.API, HueLightBrightness,
+		resource.Registration[toggleswitch.Switch, *LightBrightnessConfig]{
+			Constructor: newHueLightBrightness,
 		},
 	)
 }
 
-type LightConfig struct {
+type LightBrightnessConfig struct {
 	BridgeHost string `json:"bridge_host,omitempty"`
 	Username   string `json:"username"`
 	LightID    int    `json:"light_id"`
 }
 
-func (cfg *LightConfig) Validate(path string) ([]string, []string, error) {
+func (cfg *LightBrightnessConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.Username == "" {
 		return nil, nil, fmt.Errorf("need a username (API key) for the Hue bridge")
 	}
@@ -36,64 +36,49 @@ func (cfg *LightConfig) Validate(path string) ([]string, []string, error) {
 	return nil, nil, nil
 }
 
-type hueLight struct {
+type hueLightBrightness struct {
 	resource.AlwaysRebuild
 	resource.TriviallyCloseable
 
-	name resource.Name
-
+	name   resource.Name
 	logger logging.Logger
-	cfg    *LightConfig
+	cfg    *LightBrightnessConfig
 
 	bridge *huego.Bridge
 	light  *huego.Light
 }
 
-func newHueLight(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (toggleswitch.Switch, error) {
-	conf, err := resource.NativeConfig[*LightConfig](rawConf)
+func newHueLightBrightness(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (toggleswitch.Switch, error) {
+	conf, err := resource.NativeConfig[*LightBrightnessConfig](rawConf)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &hueLight{
+	s := &hueLightBrightness{
 		name:   rawConf.ResourceName(),
 		logger: logger,
 		cfg:    conf,
 	}
 
-	bridgeHost := conf.BridgeHost
-
-	// If no bridge host specified, discover it automatically
-	if bridgeHost == "" {
-		logger.Info("No bridge_host specified, discovering Hue bridge...")
-		bridge, err := huego.Discover()
-		if err != nil {
-			return nil, fmt.Errorf("failed to discover Hue bridge: %w", err)
-		}
-		bridgeHost = bridge.Host
-		logger.Infof("Discovered Hue bridge at %s", bridgeHost)
-	}
-
-	s.bridge = huego.New(bridgeHost, conf.Username)
-
-	s.light, err = s.bridge.GetLight(conf.LightID)
+	s.bridge, s.light, err = connectToLight(conf.BridgeHost, conf.Username, conf.LightID, logger)
 	if err != nil {
-		return nil, fmt.Errorf("can't get light %d from Hue bridge @ (%s): %w", conf.LightID, bridgeHost, err)
+		return nil, err
 	}
 
 	return s, nil
 }
 
-func (s *hueLight) Name() resource.Name {
+func (s *hueLightBrightness) Name() resource.Name {
 	return s.name
 }
 
-func (s *hueLight) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+func (s *hueLightBrightness) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
 	return nil, nil
 }
 
-func (s *hueLight) SetPosition(ctx context.Context, position uint32, extra map[string]interface{}) error {
-	// Refresh light state
+// SetPosition controls on/off and brightness.
+// 0 = off. 1 = full brightness. Higher values map to brightness levels.
+func (s *hueLightBrightness) SetPosition(ctx context.Context, position uint32, extra map[string]interface{}) error {
 	light, err := s.bridge.GetLight(s.cfg.LightID)
 	if err != nil {
 		return fmt.Errorf("failed to get light state: %w", err)
@@ -130,7 +115,7 @@ func (s *hueLight) SetPosition(ctx context.Context, position uint32, extra map[s
 	return nil
 }
 
-func (s *hueLight) GetPosition(ctx context.Context, extra map[string]interface{}) (uint32, error) {
+func (s *hueLightBrightness) GetPosition(ctx context.Context, extra map[string]interface{}) (uint32, error) {
 	// Refresh light state
 	light, err := s.bridge.GetLight(s.cfg.LightID)
 	if err != nil {
@@ -155,7 +140,7 @@ func (s *hueLight) GetPosition(ctx context.Context, extra map[string]interface{}
 	return 1, nil
 }
 
-func (s *hueLight) GetNumberOfPositions(ctx context.Context, extra map[string]interface{}) (uint32, []string, error) {
+func (s *hueLightBrightness) GetNumberOfPositions(ctx context.Context, extra map[string]interface{}) (uint32, []string, error) {
 	// 0 = off, 1-100 = brightness levels
 	return 101, nil, nil
 }
