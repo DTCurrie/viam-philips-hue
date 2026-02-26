@@ -60,17 +60,18 @@ func newHueLightColor(ctx context.Context, deps resource.Dependencies, rawConf r
 		return nil, err
 	}
 
-	bridge, _, err := connectToLight(conf.BridgeHost, conf.Username, conf.LightID, logger)
+	s := &hueLightColor{
+		name:   rawConf.ResourceName(),
+		logger: logger,
+		cfg:    conf,
+	}
+
+	s.bridge, _, err = connectToLight(conf.BridgeHost, conf.Username, conf.LightID, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	return &hueLightColor{
-		name:   rawConf.ResourceName(),
-		logger: logger,
-		cfg:    conf,
-		bridge: bridge,
-	}, nil
+	return s, nil
 }
 
 func (s *hueLightColor) Name() resource.Name {
