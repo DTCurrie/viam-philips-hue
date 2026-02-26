@@ -21,16 +21,19 @@ func init() {
 	)
 }
 
-// LightColorConfig embeds LightConfig and adds a per-channel selector.
-// Validate for the shared fields is inherited; channel is validated here.
 type LightColorConfig struct {
-	LightConfig
-	Channel string `json:"channel"` // "red", "green", or "blue"
+	BridgeHost string `json:"bridge_host,omitempty"`
+	Username   string `json:"username"`
+	LightID    int    `json:"light_id"`
+	Channel    string `json:"channel"` // "red", "green", or "blue"
 }
 
 func (cfg *LightColorConfig) Validate(path string) ([]string, []string, error) {
-	if _, _, err := cfg.LightConfig.Validate(path); err != nil {
-		return nil, nil, err
+	if cfg.Username == "" {
+		return nil, nil, fmt.Errorf("need a username (API key) for the Hue bridge")
+	}
+	if cfg.LightID == 0 {
+		return nil, nil, fmt.Errorf("need a light_id")
 	}
 	switch cfg.Channel {
 	case "red", "green", "blue":
@@ -57,7 +60,7 @@ func newHueLightColor(ctx context.Context, deps resource.Dependencies, rawConf r
 		return nil, err
 	}
 
-	bridge, _, err := connectToLight(&conf.LightConfig, logger)
+	bridge, _, err := connectToLight(conf.BridgeHost, conf.Username, conf.LightID, logger)
 	if err != nil {
 		return nil, err
 	}

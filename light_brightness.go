@@ -20,9 +20,20 @@ func init() {
 	)
 }
 
-// LightBrightnessConfig embeds LightConfig — Validate is inherited.
 type LightBrightnessConfig struct {
-	LightConfig
+	BridgeHost string `json:"bridge_host,omitempty"`
+	Username   string `json:"username"`
+	LightID    int    `json:"light_id"`
+}
+
+func (cfg *LightBrightnessConfig) Validate(path string) ([]string, []string, error) {
+	if cfg.Username == "" {
+		return nil, nil, fmt.Errorf("need a username (API key) for the Hue bridge")
+	}
+	if cfg.LightID == 0 {
+		return nil, nil, fmt.Errorf("need a light_id")
+	}
+	return nil, nil, nil
 }
 
 type hueLightBrightness struct {
@@ -43,7 +54,7 @@ func newHueLightBrightness(ctx context.Context, deps resource.Dependencies, rawC
 		return nil, err
 	}
 
-	bridge, light, err := connectToLight(&conf.LightConfig, logger)
+	bridge, light, err := connectToLight(conf.BridgeHost, conf.Username, conf.LightID, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +77,7 @@ func (s *hueLightBrightness) DoCommand(ctx context.Context, cmd map[string]inter
 }
 
 // SetPosition controls on/off and brightness.
-// 0 = off; position 1 is full brightness, higher values map to brightness levels.
+// 0 = off. 1 = full brightness. Higher values map to brightness levels.
 func (s *hueLightBrightness) SetPosition(ctx context.Context, position uint32, extra map[string]interface{}) error {
 	light, err := s.bridge.GetLight(s.cfg.LightID)
 	if err != nil {
@@ -75,24 +86,29 @@ func (s *hueLightBrightness) SetPosition(ctx context.Context, position uint32, e
 	s.light = light
 
 	if position == 0 {
-		if err := s.light.Off(); err != nil {
+		// Turn off
+		err := s.light.Off()
+		if err != nil {
 			return fmt.Errorf("failed to turn off light: %w", err)
 		}
-		return nil
-	}
-
-	if err := s.light.On(); err != nil {
-		return fmt.Errorf("failed to turn on light: %w", err)
-	}
-
-	if position <= 100 {
-		// Hue brightness is 1–254.
-		bri := uint8((float64(position) / 100.0) * 254)
-		if bri < 1 {
-			bri = 1
+	} else {
+		// Turn on - position 1 is full brightness, higher values could map to brightness levels
+		err := s.light.On()
+		if err != nil {
+			return fmt.Errorf("failed to turn on light: %w", err)
 		}
-		if err := s.light.Bri(bri); err != nil {
-			return fmt.Errorf("failed to set brightness: %w", err)
+
+		// If position > 1, use it as a brightness percentage (2-100 maps to brightness)
+		if position > 1 && position <= 100 {
+			// Hue brightness is 1-254
+			bri := uint8((float64(position) / 100.0) * 254)
+			if bri < 1 {
+				bri = 1
+			}
+			err := s.light.Bri(bri)
+			if err != nil {
+				return fmt.Errorf("failed to set brightness: %w", err)
+			}
 		}
 	}
 
