@@ -6,7 +6,7 @@ import (
 	"math"
 
 	"github.com/amimof/huego"
-	"go.viam.com/rdk/components/switch"
+	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 )
@@ -106,8 +106,25 @@ func (s *hueLightColor) SetPosition(ctx context.Context, position uint32, extra 
 		b = channelValue
 	}
 
+	maxChan := maxUint8(r, g, b)
+	if maxChan == 0 {
+		if err := light.SetState(huego.State{On: false}); err != nil {
+			return fmt.Errorf("failed to turn off light: %w", err)
+		}
+		return nil
+	}
+
+	bri := maxChan
+	if bri > 254 {
+		bri = 254
+	}
+
 	x, y := rgbToXY(r, g, b)
-	if err := light.XyContext(ctx, []float32{x, y}); err != nil {
+	if err := light.SetState(huego.State{
+		On:  true,
+		Xy:  []float32{x, y},
+		Bri: bri,
+	}); err != nil {
 		return fmt.Errorf("failed to set color: %w", err)
 	}
 
@@ -163,7 +180,14 @@ func rgbToXY(r, g, b uint8) (x, y float32) {
 	return float32(X / sum), float32(Y / sum)
 }
 
-// xyBriToRGB converts CIE xy chromaticity + Hue brightness (1–254) to sRGB (0–255).
+// xyBriToRGB converts CIE xy chromaticity + brightness to sRGB (0–255).
+//
+// Bri is treated as max(r, g, b) — the encoding SetPosition writes. The
+// color direction is computed at Y=1 (full luminance), the brightest linear
+// channel is normalized to 1.0, gamma is applied to get 8-bit sRGB at full
+// brightness, and then every channel is scaled by Bri/255 so that the
+// brightest channel equals Bri. This matches SetPosition's Bri=max(r,g,b)
+// encoding and makes the round-trip lossless.
 func xyBriToRGB(xy []float32, bri uint8) (r, g, b uint8) {
 	if len(xy) < 2 {
 		return 0, 0, 0
@@ -175,28 +199,47 @@ func xyBriToRGB(xy []float32, bri uint8) (r, g, b uint8) {
 		return 0, 0, 0
 	}
 
-	Y := float64(bri) / 254.0
-	X := (Y / y) * x
-	Z := (Y / y) * (1 - x - y)
+	// Use Y=1 to extract the pure color direction regardless of stored luminance.
+	X := x / y
+	Z := (1 - x - y) / y
 
 	// Wide gamut D65 inverse matrix.
-	rLin := X*1.656492 - Y*0.354851 - Z*0.255038
-	gLin := -X*0.707196 + Y*1.655397 + Z*0.036152
-	bLin := X*0.051713 - Y*0.121364 + Z*1.011530
+	rLin := X*1.656492 - 0.354851 - Z*0.255038
+	gLin := -X*0.707196 + 1.655397 + Z*0.036152
+	bLin := X*0.051713 - 0.121364 + Z*1.011530
 
 	rLin = math.Max(0, rLin)
 	gLin = math.Max(0, gLin)
 	bLin = math.Max(0, bLin)
 
-	// Scale so the brightest channel is 1.0, preserving hue.
+	// Normalize so the brightest linear channel = 1.0, preserving hue.
 	scale := math.Max(rLin, math.Max(gLin, bLin))
-	if scale > 1 {
+	if scale > 0 {
 		rLin /= scale
 		gLin /= scale
 		bLin /= scale
 	}
 
-	return linearToSRGB8(rLin), linearToSRGB8(gLin), linearToSRGB8(bLin)
+	// Convert to 8-bit sRGB at full brightness (max channel = 255).
+	rFull := float64(linearToSRGB8(rLin))
+	gFull := float64(linearToSRGB8(gLin))
+	bFull := float64(linearToSRGB8(bLin))
+
+	// Scale by Bri/255 so that max(r,g,b) == Bri, matching SetPosition's encoding.
+	briF := float64(bri) / 255.0
+	return uint8(math.Round(rFull * briF)),
+		uint8(math.Round(gFull * briF)),
+		uint8(math.Round(bFull * briF))
+}
+
+func maxUint8(a, b, c uint8) uint8 {
+	if a >= b && a >= c {
+		return a
+	}
+	if b >= c {
+		return b
+	}
+	return c
 }
 
 func srgbToLinear(c float64) float64 {

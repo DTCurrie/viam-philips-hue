@@ -3,9 +3,11 @@ package hue
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/amimof/huego"
-	"go.viam.com/rdk/components/switch"
+	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/services/discovery"
@@ -125,6 +127,17 @@ func (s *HueDiscover) DiscoverResources(ctx context.Context, extra map[string]an
 	return s.DiscoverHue(ctx)
 }
 
+// sanitizeName replaces any character that is not alphanumeric, '-', or '_'
+// with '-', then collapses runs of '-' and trims leading/trailing '-'.
+var reUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
+var reCollapse = regexp.MustCompile(`-{2,}`)
+
+func sanitizeName(name string) string {
+	s := reUnsafe.ReplaceAllString(name, "-")
+	s = reCollapse.ReplaceAllString(s, "-")
+	return strings.Trim(s, "-")
+}
+
 func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error) {
 	lights, err := s.bridge.GetLights()
 	if err != nil {
@@ -132,6 +145,8 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 	}
 
 	configs := []resource.Config{}
+	var colorLightIDs []int
+
 	for _, light := range lights {
 		colorMode := ""
 		if light.State != nil {
@@ -141,6 +156,8 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 
 		s.logger.Debugf("discovery result light: %d %s type: %s colormode: %s", light.ID, light.Name, light.Type, colorMode)
 
+		safeName := sanitizeName(light.Name)
+
 		baseAttrs := utils.AttributeMap{
 			"bridge_host": s.cfg.BridgeHost,
 			"username":    s.cfg.Username,
@@ -149,7 +166,7 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 
 		// All lights support brightness control.
 		configs = append(configs, resource.Config{
-			Name:       light.Name,
+			Name:       safeName,
 			API:        toggleswitch.API,
 			Model:      HueLightBrightness,
 			Attributes: baseAttrs,
@@ -157,6 +174,7 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 
 		// Color lights get one switch per RGB channel.
 		if supportsColor {
+			colorLightIDs = append(colorLightIDs, light.ID)
 			for _, channel := range []string{"red", "green", "blue"} {
 				channelAttrs := utils.AttributeMap{
 					"bridge_host": s.cfg.BridgeHost,
@@ -165,7 +183,7 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 					"channel":     channel,
 				}
 				configs = append(configs, resource.Config{
-					Name:       fmt.Sprintf("%s-%s", light.Name, channel),
+					Name:       fmt.Sprintf("%s-%s", safeName, channel),
 					API:        toggleswitch.API,
 					Model:      HueLightColor,
 					Attributes: channelAttrs,
@@ -173,5 +191,20 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 			}
 		}
 	}
+
+	// Emit a single mode switch covering all color-capable lights.
+	if len(colorLightIDs) > 0 {
+		configs = append(configs, resource.Config{
+			Name:  "hue-mode",
+			API:   toggleswitch.API,
+			Model: HueLightMode,
+			Attributes: utils.AttributeMap{
+				"bridge_host": s.cfg.BridgeHost,
+				"username":    s.cfg.Username,
+				"dance":       map[string][]int{"all": colorLightIDs},
+			},
+		})
+	}
+
 	return configs, nil
 }

@@ -3,9 +3,10 @@ package hue
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/amimof/huego"
-	"go.viam.com/rdk/components/switch"
+	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 )
@@ -44,8 +45,8 @@ type hueLightBrightness struct {
 	logger logging.Logger
 	cfg    *LightBrightnessConfig
 
-	bridge *huego.Bridge
-	light  *huego.Light
+	bridge  *huego.Bridge
+	lastBri uint8 // last brightness set via positions 2-100, used by position 1 to restore
 }
 
 func newHueLightBrightness(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (toggleswitch.Switch, error) {
@@ -60,9 +61,15 @@ func newHueLightBrightness(ctx context.Context, deps resource.Dependencies, rawC
 		cfg:    conf,
 	}
 
-	s.bridge, s.light, err = connectToLight(conf.BridgeHost, conf.Username, conf.LightID, logger)
+	var light *huego.Light
+	s.bridge, light, err = connectToLight(conf.BridgeHost, conf.Username, conf.LightID, logger)
 	if err != nil {
 		return nil, err
+	}
+
+	s.lastBri = light.State.Bri
+	if s.lastBri == 0 {
+		s.lastBri = 254
 	}
 
 	return s, nil
@@ -77,67 +84,50 @@ func (s *hueLightBrightness) DoCommand(ctx context.Context, cmd map[string]inter
 }
 
 // SetPosition controls on/off and brightness.
-// 0 = off. 1 = full brightness. Higher values map to brightness levels.
+// 0 = off. 1 = on at last-set brightness. 2-100 map to brightness levels (Hue Bri 1-254).
 func (s *hueLightBrightness) SetPosition(ctx context.Context, position uint32, extra map[string]interface{}) error {
+	if position > 100 {
+		return fmt.Errorf("position must be 0-100, got %d", position)
+	}
+
 	light, err := s.bridge.GetLight(s.cfg.LightID)
 	if err != nil {
 		return fmt.Errorf("failed to get light state: %w", err)
 	}
-	s.light = light
 
 	if position == 0 {
-		// Turn off
-		err := s.light.Off()
-		if err != nil {
-			return fmt.Errorf("failed to turn off light: %w", err)
-		}
-	} else {
-		// Turn on - position 1 is full brightness, higher values could map to brightness levels
-		err := s.light.On()
-		if err != nil {
-			return fmt.Errorf("failed to turn on light: %w", err)
-		}
-
-		// If position > 1, use it as a brightness percentage (2-100 maps to brightness)
-		if position > 1 && position <= 100 {
-			// Hue brightness is 1-254
-			bri := uint8((float64(position) / 100.0) * 254)
-			if bri < 1 {
-				bri = 1
-			}
-			err := s.light.Bri(bri)
-			if err != nil {
-				return fmt.Errorf("failed to set brightness: %w", err)
-			}
-		}
+		return light.SetState(huego.State{On: false})
+	}
+	if position == 1 {
+		return light.SetState(huego.State{On: true, Bri: s.lastBri})
 	}
 
-	return nil
+	// Map 2-100 linearly to Hue brightness range 1-254.
+	bri := max(uint8(math.Round(float64(position-2)/98.0*253.0)), 1)
+	s.lastBri = bri
+	return light.SetState(huego.State{On: true, Bri: bri})
 }
 
 func (s *hueLightBrightness) GetPosition(ctx context.Context, extra map[string]interface{}) (uint32, error) {
-	// Refresh light state
 	light, err := s.bridge.GetLight(s.cfg.LightID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get light state: %w", err)
 	}
-	s.light = light
 
-	if !s.light.State.On {
+	if !light.State.On {
 		return 0, nil
 	}
 
-	// Return brightness as position (1-100 scale)
-	// Hue brightness is 1-254
-	if s.light.State.Bri > 0 {
-		pos := uint32((float64(s.light.State.Bri) / 254.0) * 100)
-		if pos < 1 {
-			pos = 1
-		}
-		return pos, nil
+	if light.State.Bri >= 254 {
+		return 1, nil
 	}
 
-	return 1, nil
+	// Map Hue brightness 1-253 back to position 2-100.
+	pos := uint32(math.Round(float64(light.State.Bri)/253.0*98.0)) + 2
+	if pos > 100 {
+		pos = 100
+	}
+	return pos, nil
 }
 
 func (s *hueLightBrightness) GetNumberOfPositions(ctx context.Context, extra map[string]interface{}) (uint32, []string, error) {
