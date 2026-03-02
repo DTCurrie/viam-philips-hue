@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/amimof/huego"
+	"go.viam.com/rdk/components/sensor"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
@@ -164,11 +165,17 @@ func (s *HueDiscover) DiscoverHue(ctx context.Context) ([]resource.Config, error
 			"light_id":    light.ID,
 		}
 
-		// All lights support brightness control.
+		// All lights support brightness control and sensor readings.
 		configs = append(configs, resource.Config{
 			Name:       safeName,
 			API:        toggleswitch.API,
 			Model:      HueLightBrightness,
+			Attributes: baseAttrs,
+		})
+		configs = append(configs, resource.Config{
+			Name:       fmt.Sprintf("%s-sensor", safeName),
+			API:        sensor.API,
+			Model:      HueLightSensor,
 			Attributes: baseAttrs,
 		})
 
