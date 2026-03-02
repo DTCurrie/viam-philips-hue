@@ -27,6 +27,11 @@
       "api": "rdk:service:discovery",
       "model": "erh:viam-philips-hue:hue-discovery",
       "short_description": "Philips Hue Discovery Service"
+    },
+    {
+      "api": "rdk:component:sensor",
+      "model": "erh:viam-philips-hue:hue-light-sensor",
+      "short_description": "Philips Hue light brightness and color sensor readings"
     }
   ],
   "entrypoint": "bin/viam-philips-hue",

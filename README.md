@@ -99,6 +99,66 @@ Controls a single RGB color channel on a Philips Hue light that supports color. 
 
 - Position 0–255: Color channel intensity (maps 1:1 to the 0–255 channel value)
 
+## hue-light-sensor
+
+Reports the current brightness and RGB color of a single Philips Hue light. Implements the sensor interface. The bridge IP will be discovered automatically if not specified.
+
+```json
+{
+  "username": "your-api-username-here",
+  "light_id": 1
+}
+```
+
+Or with explicit bridge host:
+
+```json
+{
+  "bridge_host": "192.168.1.100",
+  "username": "your-api-username-here",
+  "light_id": 1
+}
+```
+
+### Readings
+
+**Light metadata:**
+
+| Key            | Type   | Description                              |
+| -------------- | ------ | ---------------------------------------- |
+| `light_name`   | string | User-assigned light name                 |
+| `light_type`   | string | Light type (e.g. "Extended color light") |
+| `model_id`     | string | Hardware model identifier                |
+| `manufacturer` | string | Manufacturer name                        |
+| `product_name` | string | Human-readable product name              |
+| `unique_id`    | string | MAC-based unique identifier              |
+| `sw_version`   | string | Firmware version                         |
+
+**Native state:**
+
+| Key          | Type   | Range   | Description                                       |
+| ------------ | ------ | ------- | ------------------------------------------------- |
+| `is_on`      | bool   |         | Whether the light is currently on                 |
+| `reachable`  | bool   |         | Whether the bridge can communicate with the light |
+| `hue_bri`    | int    | 0–254   | Raw Hue brightness                                |
+| `hue`        | int    | 0–65535 | HSB hue angle                                     |
+| `saturation` | int    | 0–254   | HSB saturation                                    |
+| `cie_x`      | float  | 0.0–1.0 | CIE xy chromaticity x coordinate                  |
+| `cie_y`      | float  | 0.0–1.0 | CIE xy chromaticity y coordinate                  |
+| `color_temp` | int    | 153–500 | Color temperature in mireds                       |
+| `color_mode` | string |         | Active color mode: `"hs"`, `"xy"`, or `"ct"`      |
+| `effect`     | string |         | Dynamic effect: `"none"` or `"colorloop"`         |
+| `alert`      | string |         | Alert state: `"none"`, `"select"`, or `"lselect"` |
+
+**Computed values:**
+
+| Key          | Type | Range | Description                |
+| ------------ | ---- | ----- | -------------------------- |
+| `brightness` | int  | 0–100 | Brightness as a percentage |
+| `red`        | int  | 0–255 | Red channel intensity      |
+| `green`      | int  | 0–255 | Green channel intensity    |
+| `blue`       | int  | 0–255 | Blue channel intensity     |
+
 ## hue-lights-mode
 
 Controls pre-defined lighting modes across one or more lights. The default mode is `"none"`, which restores lights to their state before any mode was activated. When switching to a mode, the current light state is automatically saved so it can be restored when returning to `"none"`.
