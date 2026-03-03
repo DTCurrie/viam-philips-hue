@@ -101,6 +101,7 @@ func (s *hueLightSensor) Readings(ctx context.Context, extra map[string]interfac
 		"product_name": light.ProductName,
 		"unique_id":    light.UniqueID,
 		"sw_version":   light.SwVersion,
+
 		// Native state
 		"is_on":      light.State.On,
 		"hue_bri":    int(light.State.Bri),
@@ -113,6 +114,7 @@ func (s *hueLightSensor) Readings(ctx context.Context, extra map[string]interfac
 		"reachable":  light.State.Reachable,
 		"effect":     light.State.Effect,
 		"alert":      light.State.Alert,
+
 		// Computed values
 		"brightness": brightness,
 		"red":        int(r),
